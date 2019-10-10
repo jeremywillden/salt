@@ -1,20 +1,14 @@
-# -*- coding: utf-8 -*-
 """
     tests.unit.test_test_module_name
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
 
-# Import Python libs
-from __future__ import absolute_import
 
 import fnmatch
 import os
 
-# Import Salt libs
 import salt.utils.path
 import salt.utils.stringutils
-
-# Import Salt Testing libs
 from tests.support.paths import list_test_mods
 from tests.support.runtests import RUNTIME_VARS
 from tests.support.unit import TestCase, skipIf
@@ -221,7 +215,7 @@ class BadTestModuleNamesTestCase(TestCase):
 
         def _format_errors(errors):
             msg = (
-                "The following {0} test module(s) could not be matched to a "
+                "The following {} test module(s) could not be matched to a "
                 "source code file:\n\n".format(len(errors))
             )
             msg += "".join(errors)
@@ -258,6 +252,6 @@ class BadTestModuleNamesTestCase(TestCase):
                     # Yep, it is. Carry on!
                     continue
 
-                errors.append("{0} (expected: {1})\n".format(mod_name, relpath))
+                errors.append("{} (expected: {})\n".format(mod_name, relpath))
 
         assert not errors, _format_errors(errors)
