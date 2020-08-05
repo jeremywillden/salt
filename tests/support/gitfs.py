@@ -2,26 +2,25 @@
 Base classes for gitfs/git_pillar integration tests
 """
 
-
 import copy
 import errno
 import logging
 import os
-import pathlib
 import pprint
 import shutil
 import tempfile
 import textwrap
 
+import attr
 import salt.utils.files
 import salt.utils.path
 import salt.utils.yaml
 from salt.fileserver import gitfs
 from salt.pillar import git_pillar
+from saltfactories.factories.base import DaemonFactory
+from saltfactories.factories.daemons.sshd import SshdDaemonFactory
 from saltfactories.utils.ports import get_unused_localhost_port
-from saltfactories.utils.processes.bases import FactoryDaemonScriptBase
-from saltfactories.utils.processes.helpers import start_daemon, terminate_process
-from saltfactories.utils.processes.sshd import SshdDaemon
+from saltfactories.utils.processes import terminate_process
 from tests.support.case import ModuleCase
 from tests.support.helpers import patched_environ, requires_system_grains
 from tests.support.mixins import (
@@ -37,6 +36,7 @@ try:
     import psutil
 except ImportError:
     pass
+
 
 log = logging.getLogger(__name__)
 
@@ -77,16 +77,10 @@ _OPTS = {
 PROC_TIMEOUT = 10
 
 
-class UwsgiDaemon(FactoryDaemonScriptBase):
-    def __init__(self, *args, **kwargs):
-        config_dir = kwargs.pop("config_dir")
-        check_port = kwargs.pop("check_port")
-        super().__init__(*args, **kwargs)
-        self.config_dir = config_dir
-        self.check_port = check_port
+@attr.s(kw_only=True, slots=True)
+class UwsgiDaemon(DaemonFactory):
 
-    def get_log_prefix(self):
-        return "[uWSGI] "
+    config_dir = attr.ib()
 
     def get_base_script_args(self):
         """
@@ -94,35 +88,17 @@ class UwsgiDaemon(FactoryDaemonScriptBase):
         """
         return ["--yaml", os.path.join(self.config_dir, "uwsgi.yml")]
 
-    def get_check_ports(self):
-        """
-        Return a list of ports to check against to ensure the daemon is running
-        """
-        return [self.check_port]
 
+@attr.s(kw_only=True, slots=True)
+class NginxDaemon(DaemonFactory):
 
-class NginxDaemon(FactoryDaemonScriptBase):
-    def __init__(self, *args, **kwargs):
-        config_dir = kwargs.pop("config_dir")
-        check_port = kwargs.pop("check_port")
-        super().__init__(*args, **kwargs)
-        self.config_dir = config_dir
-        self.check_port = check_port
-
-    def get_log_prefix(self):
-        return "[Nginx] "
+    config_dir = attr.ib()
 
     def get_base_script_args(self):
         """
         Returns any additional arguments to pass to the CLI script
         """
         return ["-c", os.path.join(self.config_dir, "nginx.conf")]
-
-    def get_check_ports(self):
-        """
-        Return a list of ports to check against to ensure the daemon is running
-        """
-        return [self.check_port]
 
 
 class SaltClientMixin(ModuleCase):
@@ -221,14 +197,16 @@ class SSHDMixin(SaltClientMixin, SaltReturnAssertsMixin):
                         "%s: sshd started but appears to be dead now. Will try to restart it.",
                         cls.__name__,
                     )
+                    cls.sshd_proc.terminate()
                     cls.sshd_proc = None
             if cls.sshd_proc is None:
-                cls.sshd_proc = start_daemon(
-                    cls.sshd_bin,
-                    SshdDaemon,
-                    config_dir=pathlib.Path(cls.sshd_config_dir),
-                    serve_port=cls.sshd_port,
+                cls.sshd_proc = SshdDaemonFactory(
+                    cli_script_name=cls.sshd_bin,
+                    config_dir=cls.sshd_config_dir,
+                    listen_port=cls.sshd_port,
+                    start_timeout=120,
                 )
+                cls.sshd_proc.start()
                 log.info("%s: sshd started", cls.__name__)
         except AssertionError:
             cls.tearDownClass()
@@ -256,17 +234,9 @@ class SSHDMixin(SaltClientMixin, SaltReturnAssertsMixin):
     @classmethod
     def tearDownClass(cls):
         if cls.sshd_proc is not None:
-            log.info(
-                "[%s] Stopping %s",
-                cls.sshd_proc.get_log_prefix(),
-                cls.sshd_proc.__class__.__name__,
-            )
+            log.info("Stopping %s", cls.sshd_proc)
             terminate_process(cls.sshd_proc.pid, kill_children=True, slow_stop=True)
-            log.info(
-                "[%s] %s stopped",
-                cls.sshd_proc.get_log_prefix(),
-                cls.sshd_proc.__class__.__name__,
-            )
+            log.info("Stopped %s", cls.sshd_proc)
             cls.sshd_proc = None
         if cls.prep_states_ran:
             ret = cls.cls_run_function(
@@ -379,14 +349,16 @@ class WebserverMixin(SaltClientMixin, SaltReturnAssertsMixin):
                         "%s: uWsgi started but appears to be dead now. Will try to restart it.",
                         cls.__name__,
                     )
+                    cls.uwsgi_proc.terminate()
                     cls.uwsgi_proc = None
             if cls.uwsgi_proc is None:
-                cls.uwsgi_proc = start_daemon(
-                    cls.uwsgi_bin,
-                    UwsgiDaemon,
+                cls.uwsgi_proc = UwsgiDaemon(
+                    cli_script_name=cls.uwsgi_bin,
                     config_dir=cls.config_dir,
-                    check_port=cls.uwsgi_port,
+                    check_ports=[cls.uwsgi_port],
+                    start_timeout=120,
                 )
+                cls.uwsgi_proc.start()
                 log.info("%s: %s started", cls.__name__, cls.uwsgi_bin)
             if cls.nginx_proc is not None:
                 if not psutil.pid_exists(cls.nginx_proc.pid):
@@ -394,14 +366,16 @@ class WebserverMixin(SaltClientMixin, SaltReturnAssertsMixin):
                         "%s: nginx started but appears to be dead now. Will try to restart it.",
                         cls.__name__,
                     )
+                    cls.nginx_proc.terminate()
                     cls.nginx_proc = None
             if cls.nginx_proc is None:
-                cls.nginx_proc = start_daemon(
-                    "nginx",
-                    NginxDaemon,
+                cls.nginx_proc = NginxDaemon(
+                    cli_script_name="nginx",
                     config_dir=cls.config_dir,
-                    check_port=cls.nginx_port,
+                    check_ports=[cls.nginx_port],
+                    start_timeout=120,
                 )
+                cls.nginx_proc.start()
                 log.info("%s: nginx started", cls.__name__)
         except AssertionError:
             cls.tearDownClass()
@@ -410,30 +384,14 @@ class WebserverMixin(SaltClientMixin, SaltReturnAssertsMixin):
     @classmethod
     def tearDownClass(cls):
         if cls.nginx_proc is not None:
-            log.info(
-                "[%s] Stopping %s",
-                cls.nginx_proc.get_log_prefix(),
-                cls.nginx_proc.__class__.__name__,
-            )
+            log.info("Stopping %s", cls.nginx_proc)
             terminate_process(cls.nginx_proc.pid, kill_children=True, slow_stop=True)
-            log.info(
-                "[%s] %s stopped",
-                cls.nginx_proc.get_log_prefix(),
-                cls.nginx_proc.__class__.__name__,
-            )
+            log.info("Stopped %s", cls.nginx_proc)
             cls.nginx_proc = None
         if cls.uwsgi_proc is not None:
-            log.info(
-                "[%s] Stopping %s",
-                cls.uwsgi_proc.get_log_prefix(),
-                cls.uwsgi_proc.__class__.__name__,
-            )
+            log.info("Stopping %s", cls.uwsgi_proc)
             terminate_process(cls.uwsgi_proc.pid, kill_children=True, slow_stop=True)
-            log.info(
-                "[%s] %s stopped",
-                cls.uwsgi_proc.get_log_prefix(),
-                cls.uwsgi_proc.__class__.__name__,
-            )
+            log.info("Stopped %s", cls.uwsgi_proc)
             cls.uwsgi_proc = None
         shutil.rmtree(cls.root_dir, ignore_errors=True)
         cls.prep_states_ran = False

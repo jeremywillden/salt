@@ -1,17 +1,13 @@
 """
-    tests.integration.conftest
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    tests.pytests.integration.conftest
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    Integration tests PyTest configuration/fixtures
+    PyTest fixtures
 """
-import logging
-
 import pytest
 
-log = logging.getLogger(__name__)
 
-
-@pytest.fixture(scope="package", autouse=True)
+@pytest.fixture(scope="package")
 def salt_master(salt_master_factory):
     """
     We override the fixture so that we have the daemon running
@@ -20,8 +16,8 @@ def salt_master(salt_master_factory):
         yield salt_master_factory
 
 
-@pytest.fixture(scope="package", autouse=True)
-def salt_minion(salt_minion_factory):
+@pytest.fixture(scope="package")
+def salt_minion(salt_master, salt_minion_factory):
     """
     We override the fixture so that we have the daemon running
     """
@@ -34,7 +30,7 @@ def salt_minion(salt_minion_factory):
 
 
 @pytest.fixture(scope="package")
-def salt_sub_minion(salt_sub_minion_factory):
+def salt_sub_minion(salt_master, salt_sub_minion_factory):
     """
     We override the fixture so that we have the daemon running
     """
@@ -44,3 +40,9 @@ def salt_sub_minion(salt_sub_minion_factory):
         ret = salt_call_cli.run("saltutil.sync_all", _timeout=120)
         assert ret.exitcode == 0, ret
         yield salt_sub_minion_factory
+
+
+@pytest.fixture(scope="package")
+def salt_proxy(salt_master, salt_proxy_factory):
+    with salt_proxy_factory.started():
+        yield salt_proxy_factory
