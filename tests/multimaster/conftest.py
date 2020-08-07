@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="package")
-def salt_mm_master(salt_factories):
+def salt_mm_master(salt_factories, log_server):
     root_dir = salt_factories._get_root_dir_for_daemon("mm-master")
     with salt.utils.files.fopen(
         os.path.join(RUNTIME_VARS.CONF_DIR, "mm_master")

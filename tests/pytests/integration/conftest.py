@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.fixture(scope="package")
-def salt_master(salt_master_factory):
+def salt_master(salt_factories, log_server, salt_master_factory):
     """
     We override the fixture so that we have the daemon running
     """
