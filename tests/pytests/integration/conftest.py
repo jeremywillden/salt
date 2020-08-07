@@ -14,7 +14,7 @@ def salt_master(salt_master_factory):
     """
     if salt_master_factory.is_running():
         salt_master_factory.terminate()
-    with salt_master_factory.started():
+    with salt_master_factory.started("--log-level=debug"):
         yield salt_master_factory
 
 
@@ -52,5 +52,5 @@ def salt_sub_minion(salt_master, salt_sub_minion_factory):
 def salt_proxy(salt_master, salt_proxy_factory):
     if salt_proxy_factory.is_running():
         salt_proxy_factory.terminate()
-    with salt_proxy_factory.started():
+    with salt_proxy_factory.started("--log-level=debug"):
         yield salt_proxy_factory
